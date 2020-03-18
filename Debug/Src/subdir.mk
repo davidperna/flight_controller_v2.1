@@ -4,12 +4,12 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
+../Src/MPU9250.c \
 ../Src/adc.c \
 ../Src/dma.c \
 ../Src/gpio.c \
 ../Src/i2c.c \
 ../Src/main.c \
-../Src/mpu9250.c \
 ../Src/spi.c \
 ../Src/stm32f4xx_hal_msp.c \
 ../Src/stm32f4xx_it.c \
@@ -18,12 +18,12 @@ C_SRCS += \
 ../Src/usart.c 
 
 OBJS += \
+./Src/MPU9250.o \
 ./Src/adc.o \
 ./Src/dma.o \
 ./Src/gpio.o \
 ./Src/i2c.o \
 ./Src/main.o \
-./Src/mpu9250.o \
 ./Src/spi.o \
 ./Src/stm32f4xx_hal_msp.o \
 ./Src/stm32f4xx_it.o \
@@ -32,12 +32,12 @@ OBJS += \
 ./Src/usart.o 
 
 C_DEPS += \
+./Src/MPU9250.d \
 ./Src/adc.d \
 ./Src/dma.d \
 ./Src/gpio.d \
 ./Src/i2c.d \
 ./Src/main.d \
-./Src/mpu9250.d \
 ./Src/spi.d \
 ./Src/stm32f4xx_hal_msp.d \
 ./Src/stm32f4xx_it.d \

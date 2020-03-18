@@ -52,6 +52,7 @@
 #include "string.h"
 #include "stdbool.h"
 #include <stdlib.h>
+#include "MPU9250.h"
 
 #define M_PI 3.1415926
 #define EPSILON 0.0000001
@@ -113,10 +114,6 @@ __IO bool i2c1_mem_tx_irq_flag = false;
 
 __IO bool flg_new_debug_message = false;
 __IO bool flg_new_receiver_input = false;
-
-bool started_main_loop = false;
-
-uint16_t num_div_by_0 = 0;
 
 #define DEBUG_OVER_WIRELESS
 
@@ -279,6 +276,33 @@ int main(void)
 	sprintf (buffer, "BMP280 ID: %X\n", i2c1_rx_buffer[0]);
 	send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
 
+
+	uint8_t reg_val = MPU9250_PRIV_whoAmI();
+	sprintf (buffer, "MPU9250 ID: %X\n", reg_val);
+	send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+
+	MPU9250_begin();
+	MPU9250_readSensor();
+
+	while(1)
+	{
+		MPU9250_readSensor();
+		sprintf (buffer, "Accel: %0.3f %0.3f %0.3f Gyro: %0.3f %0.3f %0.3f Mag: %0.3f %0.3f %0.3f Temp: %0.3f\n",
+		MPU9250_getAccelX_mss(),
+		MPU9250_getAccelY_mss(),
+		MPU9250_getAccelZ_mss(),
+		MPU9250_getGyroX_rads(),
+		MPU9250_getGyroY_rads(),
+		MPU9250_getGyroZ_rads(),
+		MPU9250_getMagX_uT(),
+		MPU9250_getMagY_uT(),
+		MPU9250_getMagZ_uT(),
+		MPU9250_getTemperature_C());
+
+		send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+
+		HAL_Delay(100);
+	}
 	uint32_t loop_counter = 0;
 
   while (1)
@@ -350,8 +374,8 @@ int main(void)
 
 	if(loop_counter%40 == 0)
 	{
-		sprintf (debug_tx_buffer, "Channels: %d %d %d %d\r\n", receiver_inputs[0], receiver_inputs[1], receiver_inputs[2], receiver_inputs[3]);
-		send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, debug_tx_buffer);
+		//sprintf (debug_tx_buffer, "Channels: %d %d %d %d\r\n", receiver_inputs[0], receiver_inputs[1], receiver_inputs[2], receiver_inputs[3]);
+		//send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, debug_tx_buffer);
 	}
 	while((get_micros()) < 2500);
 	loop_counter ++;

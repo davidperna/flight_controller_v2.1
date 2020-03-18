@@ -39,7 +39,8 @@ Src/main.o: ../Src/main.c \
  C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/spi.h \
  C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/tim.h \
  C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/usart.h \
- C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/gpio.h
+ C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/gpio.h \
+ C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/MPU9250.h
 
 C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/main.h:
 
@@ -122,3 +123,5 @@ C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_con
 C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/usart.h:
 
 C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/gpio.h:
+
+C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/MPU9250.h:
