@@ -38,6 +38,7 @@
   */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "math.h"
 #include "stm32f4xx_hal.h"
 #include "adc.h"
 #include "dma.h"
@@ -105,15 +106,17 @@ __IO uint8_t debug_rx_buffer[DEBUG_RX_BUFFER_SIZE];
 __IO uint8_t debug_tx_buffer[DEBUG_TX_BUFFER_SIZE];
 
 __IO uint16_t receiver_inputs[17];
-__IO uint8_t imu_data_buffer[14];
+__IO uint8_t imu_data_buffer[21];
 
-__IO bool new_imu_data_flag = false;
+__IO bool imu_data_ready_flag = false;
 
 __IO bool i2c1_mem_rx_irq_flag = false;
 __IO bool i2c1_mem_tx_irq_flag = false;
 
 __IO bool flg_new_debug_message = false;
 __IO bool flg_new_receiver_input = false;
+
+__IO bool continuous_imu_collection = false;
 
 #define DEBUG_OVER_WIRELESS
 
@@ -155,6 +158,7 @@ void update_receiver_inputs(void);
 // DMA helper functions
 void flush_sbus_dma_buffer(void);
 void flush_debug_dma_buffer(void);
+void flush_imu_dma_buffer(void);
 
 // ADC callbacks
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc);
@@ -267,7 +271,10 @@ int main(void)
   sprintf (buffer, "System current: %0.3f A\n", sys_current_amps);
   send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
 
-  uint8_t i2c1_rx_buffer[1];
+
+
+  /*
+    uint8_t i2c1_rx_buffer[1];
 
 	// Read BMP280 ID register
 	HAL_I2C_Mem_Read_DMA(&hi2c1, 0x76<<1, 0xD0, 1 , i2c1_rx_buffer, 1);
@@ -280,30 +287,101 @@ int main(void)
 	uint8_t reg_val = MPU9250_PRIV_whoAmI();
 	sprintf (buffer, "MPU9250 ID: %X\n", reg_val);
 	send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+*/
+  	int8_t ret = 0;
+	ret = MPU9250_begin();
+	sprintf (buffer, "%d IMU initialized\n", ret);
+	send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
 
-	MPU9250_begin();
-	MPU9250_readSensor();
+	// setting the accelerometer full scale range to +/-8G
+	ret = MPU9250_setAccelRange(ACCEL_RANGE_8G);
+	sprintf (buffer, "%d IMU accel range updated\n", ret);
+	send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
 
+	// setting the gyroscope full scale range to +/-500 deg/s
+	ret = MPU9250_setGyroRange(GYRO_RANGE_500DPS);
+	sprintf (buffer, "%d IMU gyro range updated\n", ret);
+	send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+
+	// setting DLPF bandwidth to 184 Hz
+	ret = MPU9250_setDlpfBandwidth(DLPF_BANDWIDTH_184HZ);
+	sprintf (buffer, "%d IMU bandwidth updated\n", ret);
+	send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+
+	// setting SRD to 2 for a 500 Hz update rate
+	//MPU9250_setSrd(0);
+
+	MPU9250_enableDataReadyInterrupt();
+	continuous_imu_collection = true;
+	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+	float acc_x = MPU9250_getAccelX_mss();
+	float acc_y = MPU9250_getAccelY_mss();
+	float acc_z = MPU9250_getAccelZ_mss();
+
+	float gyro_x = (-1)*MPU9250_getGyroX_rads();
+	float gyro_y = (-1)*MPU9250_getGyroY_rads();
+	float gyro_z = MPU9250_getGyroZ_rads();
+
+	float angle_roll_gyro = 0;
+	float angle_pitch_gyro = 0;
+	float angle_yaw_gyro = 0;
+
+	float acc_total_vector = 0;
+	float angle_roll_acc = 0;
+	float angle_pitch_acc = 0;
+
+	float angle_roll = 0;
+	float angle_pitch = 0;
+
+
+	uint32_t loop_counter = 0;
 	while(1)
 	{
-		MPU9250_readSensor();
-		sprintf (buffer, "Accel: %0.3f %0.3f %0.3f Gyro: %0.3f %0.3f %0.3f Mag: %0.3f %0.3f %0.3f Temp: %0.3f\n",
-		MPU9250_getAccelX_mss(),
-		MPU9250_getAccelY_mss(),
-		MPU9250_getAccelZ_mss(),
-		MPU9250_getGyroX_rads(),
-		MPU9250_getGyroY_rads(),
-		MPU9250_getGyroZ_rads(),
-		MPU9250_getMagX_uT(),
-		MPU9250_getMagY_uT(),
-		MPU9250_getMagZ_uT(),
-		MPU9250_getTemperature_C());
+		reset_micros();
 
-		send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+		HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
 
-		HAL_Delay(100);
+		acc_x = MPU9250_getAccelX_mss();
+		acc_y = MPU9250_getAccelY_mss();
+		acc_z = MPU9250_getAccelZ_mss();
+
+		gyro_x = (-1)*MPU9250_getGyroX_rads();
+		gyro_y = (-1)*MPU9250_getGyroY_rads();
+		gyro_z = MPU9250_getGyroZ_rads();
+
+
+		acc_total_vector = sqrt((acc_x*acc_x)+(acc_y*acc_y)+(acc_z*acc_z));
+
+		if(abs(acc_total_vector) > EPSILON)
+		{
+			if(abs(acc_x) < acc_total_vector)
+				angle_roll_acc = asin((float)acc_y/acc_total_vector)*(1);
+			if(abs(acc_y) < acc_total_vector)
+				angle_pitch_acc = asin((float)acc_x/acc_total_vector)*(-1);
+		}
+
+		angle_roll_gyro += gyro_x*0.001;
+		angle_pitch_gyro += gyro_y*0.001;
+		angle_yaw_gyro += gyro_z*0.001;
+
+		angle_roll_gyro += angle_pitch_gyro*sin(gyro_z*0.001);
+		angle_pitch_gyro -= angle_roll_gyro*sin(gyro_z*0.001);
+
+		angle_roll = angle_roll_gyro*0.999 + angle_roll_acc*0.001;
+		angle_pitch = angle_pitch_gyro*0.999 + angle_pitch_acc*0.001;
+
+		if(loop_counter%100 == 0)
+		{
+			sprintf (buffer, "Roll: %0.1f Pitch: %0.1f Yaw: %0.1f\n", angle_roll_gyro*57.2958, angle_pitch_gyro*57.2958, angle_yaw_gyro*57.2958);
+			send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
+		}
+
+		loop_counter ++;
+		while((get_micros()) < 1000);
 	}
-	uint32_t loop_counter = 0;
+  loop_counter = 0;
 
   while (1)
   {
@@ -377,7 +455,7 @@ int main(void)
 		//sprintf (debug_tx_buffer, "Channels: %d %d %d %d\r\n", receiver_inputs[0], receiver_inputs[1], receiver_inputs[2], receiver_inputs[3]);
 		//send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, debug_tx_buffer);
 	}
-	while((get_micros()) < 2500);
+	while((get_micros()) < 2000);
 	loop_counter ++;
 
   /* USER CODE END WHILE */
@@ -478,6 +556,16 @@ void flush_debug_dma_buffer(void)
 	return;
 }
 
+// Clear IMU DMA buffer
+void flush_imu_dma_buffer(void)
+{
+	HAL_UART_DMAStop(&hi2c1);
+	memset(imu_data_buffer, 0, sizeof(imu_data_buffer));
+	HAL_UART_Receive_DMA(&hi2c1, (uint8_t *) imu_data_buffer, sizeof(imu_data_buffer));
+	return;
+}
+
+
 // UART DMA RX transfer complete callback (receive buffer full)
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
@@ -573,7 +661,15 @@ void HAL_I2C_MemTxCpltCallback(I2C_HandleTypeDef *hi2c)
 void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 {
 	if(hi2c->Instance == I2C1)
+	{
+		// Raise I2C RX interrupt flag
 		i2c1_mem_rx_irq_flag = true;
+
+		HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
+		if(continuous_imu_collection)
+			MPU9250_convertRawData(imu_data_buffer);
+		HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
+	}
 	return;
 }
 
@@ -583,7 +679,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	//PC15 is connected to IMU interrupt pin
   if(GPIO_Pin == GPIO_PIN_15)
   {
-	  new_imu_data_flag = true;
+	  // New data is ready. Initiate new transfer
+	  imu_data_ready_flag = true;
+	  if(continuous_imu_collection)
+		  start_imu_dma_transfer();
   }
 }
 
@@ -647,8 +746,15 @@ void ADC_Init(void)
 // Initiate a non-blocking I2C register read on the IMU data registers
 void start_imu_dma_transfer()
 {
-	HAL_I2C_Mem_Read_DMA(&hi2c1, 0x68<<1, 0x3B, 1 , imu_data_buffer, sizeof(imu_data_buffer));
+	// Start a new DMA request for IMU data
+	HAL_I2C_Mem_Read_DMA(&hi2c1, MPU9250_ADDRESS<<1, 0x3B, 1 , imu_data_buffer, sizeof(imu_data_buffer));
+
+	// Reset the I2C receive flag
 	i2c1_mem_rx_irq_flag = false;
+
+	// Clear the data ready flag
+	imu_data_ready_flag = false;
+
 	return;
 }
 

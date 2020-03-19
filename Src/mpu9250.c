@@ -317,6 +317,9 @@ int MPU9250_begin()
   if (MPU9250_calibrateGyro() < 0) {
     return -20;
   }
+  if (MPU9250_calibrateAccel() < 0) {
+      return -21;
+    }
   // successful init, return 1
   return 1;
 }
@@ -582,29 +585,35 @@ int MPU9250_readSensor() {
   if (MPU9250_PRIV_readRegisters(ACCEL_OUT, 21, _buffer) < 0) {
     return -1;
   }
-  // combine into 16 bit values
-  _axcounts = (((int16_t)_buffer[0]) << 8) | _buffer[1];
-  _aycounts = (((int16_t)_buffer[2]) << 8) | _buffer[3];
-  _azcounts = (((int16_t)_buffer[4]) << 8) | _buffer[5];
-  _tcounts = (((int16_t)_buffer[6]) << 8) | _buffer[7];
-  _gxcounts = (((int16_t)_buffer[8]) << 8) | _buffer[9];
-  _gycounts = (((int16_t)_buffer[10]) << 8) | _buffer[11];
-  _gzcounts = (((int16_t)_buffer[12]) << 8) | _buffer[13];
-  _hxcounts = (((int16_t)_buffer[15]) << 8) | _buffer[14];
-  _hycounts = (((int16_t)_buffer[17]) << 8) | _buffer[16];
-  _hzcounts = (((int16_t)_buffer[19]) << 8) | _buffer[18];
-  // transform and convert to float values
-  _ax = (((float)(tX[0]*_axcounts + tX[1]*_aycounts + tX[2]*_azcounts) * _accelScale) - _axb)*_axs;
-  _ay = (((float)(tY[0]*_axcounts + tY[1]*_aycounts + tY[2]*_azcounts) * _accelScale) - _ayb)*_ays;
-  _az = (((float)(tZ[0]*_axcounts + tZ[1]*_aycounts + tZ[2]*_azcounts) * _accelScale) - _azb)*_azs;
-  _gx = ((float)(tX[0]*_gxcounts + tX[1]*_gycounts + tX[2]*_gzcounts) * _gyroScale) - _gxb;
-  _gy = ((float)(tY[0]*_gxcounts + tY[1]*_gycounts + tY[2]*_gzcounts) * _gyroScale) - _gyb;
-  _gz = ((float)(tZ[0]*_gxcounts + tZ[1]*_gycounts + tZ[2]*_gzcounts) * _gyroScale) - _gzb;
-  _hx = (((float)(_hxcounts) * _magScaleX) - _hxb)*_hxs;
-  _hy = (((float)(_hycounts) * _magScaleY) - _hyb)*_hys;
-  _hz = (((float)(_hzcounts) * _magScaleZ) - _hzb)*_hzs;
-  _t = ((((float) _tcounts) - _tempOffset)/_tempScale) + _tempOffset;
-  return 1;
+
+  return MPU9250_convertRawData(_buffer);
+}
+
+int MPU9250_convertRawData(uint8_t *raw_data)
+{
+	// combine into 16 bit values
+    _axcounts = (((int16_t)raw_data[0]) << 8) | raw_data[1];
+    _aycounts = (((int16_t)raw_data[2]) << 8) | raw_data[3];
+    _azcounts = (((int16_t)raw_data[4]) << 8) | raw_data[5];
+    _tcounts = (((int16_t)raw_data[6]) << 8) | raw_data[7];
+    _gxcounts = (((int16_t)raw_data[8]) << 8) | raw_data[9];
+    _gycounts = (((int16_t)raw_data[10]) << 8) | raw_data[11];
+    _gzcounts = (((int16_t)raw_data[12]) << 8) | raw_data[13];
+    _hxcounts = (((int16_t)raw_data[15]) << 8) | raw_data[14];
+    _hycounts = (((int16_t)raw_data[17]) << 8) | raw_data[16];
+    _hzcounts = (((int16_t)raw_data[19]) << 8) | raw_data[18];
+    // transform and convert to float values
+    _ax = (((float)(tX[0]*_axcounts + tX[1]*_aycounts + tX[2]*_azcounts) * _accelScale) - _axb)*_axs;
+    _ay = (((float)(tY[0]*_axcounts + tY[1]*_aycounts + tY[2]*_azcounts) * _accelScale) - _ayb)*_ays;
+    _az = (((float)(tZ[0]*_axcounts + tZ[1]*_aycounts + tZ[2]*_azcounts) * _accelScale) - _azb)*_azs;
+    _gx = ((float)(tX[0]*_gxcounts + tX[1]*_gycounts + tX[2]*_gzcounts) * _gyroScale) - _gxb;
+    _gy = ((float)(tY[0]*_gxcounts + tY[1]*_gycounts + tY[2]*_gzcounts) * _gyroScale) - _gyb;
+    _gz = ((float)(tZ[0]*_gxcounts + tZ[1]*_gycounts + tZ[2]*_gzcounts) * _gyroScale) - _gzb;
+    _hx = (((float)(_hxcounts) * _magScaleX) - _hxb)*_hxs;
+    _hy = (((float)(_hycounts) * _magScaleY) - _hyb)*_hys;
+    _hz = (((float)(_hzcounts) * _magScaleZ) - _hzb)*_hzs;
+    _t = ((((float) _tcounts) - _tempOffset)/_tempScale) + _tempOffset;
+	return 1;
 }
 
 /* returns the accelerometer measurement in the x direction, m/s/s */
@@ -1115,14 +1124,6 @@ int MPU9250_PRIV_writeRegister(uint8_t subAddress, uint8_t data){
   if(HAL_I2C_Mem_Write(&hi2c1, _address<<1, subAddress, 1, temp_buffer, 1, HAL_MAX_DELAY) != HAL_OK)
 	  return -1;
 
-	/* write data to device */
-  //_i2c->beginTransmission(_address); // open the device
-  //_i2c->write(subAddress); // write the register address
-  //_i2c->write(data); // write the data
-  //_i2c->endTransmission();
-
-  HAL_Delay(10);
-
   /* read back the register */
   MPU9250_PRIV_readRegisters(subAddress,1,_buffer);
   /* check the read back register against the written register */
@@ -1140,20 +1141,6 @@ int MPU9250_PRIV_readRegisters(uint8_t subAddress, uint8_t count, uint8_t* dest)
 	  return 1;
   else
 	  return -1;
-  /*
-  _i2c->beginTransmission(_address); // open the device
-  _i2c->write(subAddress); // specify the starting register address
-  _i2c->endTransmission(false);
-  _numBytes = _i2c->requestFrom(_address, count); // specify the number of bytes to receive
-  if (_numBytes == count) {
-    for(uint8_t i = 0; i < count; i++){
-  	dest[i] = _i2c->read();
-    }
-    return 1;
-  } else {
-    return -1;
-  }
-  */
 }
 
 /* writes a register to the AK8963 given a register address and data */

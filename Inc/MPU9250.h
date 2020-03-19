@@ -81,6 +81,7 @@ int MPU9250_enableDataReadyInterrupt();
 int MPU9250_disableDataReadyInterrupt();
 int MPU9250_enableWakeOnMotion(float womThresh_mg,LpAccelOdr odr);
 int MPU9250_readSensor();
+int MPU9250_convertRawData(uint8_t *raw_data);
 float MPU9250_getAccelX_mss();
 float MPU9250_getAccelY_mss();
 float MPU9250_getAccelZ_mss();
