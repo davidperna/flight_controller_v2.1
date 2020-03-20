@@ -119,7 +119,7 @@ __IO bool flg_new_receiver_input = false;
 
 __IO bool continuous_imu_collection = false;
 
-//#define DEBUG_OVER_WIRELESS
+#define DEBUG_OVER_WIRELESS
 
 #ifdef DEBUG_OVER_WIRELESS
 #define SERIAL_DEBUG_UART_INSTANCE &huart5
@@ -187,10 +187,15 @@ void reset_micros(void);
 uint32_t get_micros(void);
 
 // Motor helper functions
-void set_motor_speed(uint32_t motor_Channel, float speed_percent);
+void set_motor_speed_percent(uint32_t motor_Channel, float percent);
+void set_motor_speed_pulse(uint32_t motor_Channel, float pulse);
 void idle_all_motors();
 void stop_all_motors();
 void stop_motor(uint32_t motor_Channel);
+
+float convert_AHRS_pitch(float AHRS_pitch);
+float convert_AHRS_roll(float AHRS_roll);
+float convert_AHRS_yaw(float AHRS_yaw);
 
 /* USER CODE END PFP */
 
@@ -335,57 +340,39 @@ int main(void)
 	float mag_z = 0;//MPU9250_getMagZ_uT();
 
 	uint32_t loop_counter = 0;
-	while(1)
-	{
-		reset_micros();
-
-		HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
-
-		acc_x = MPU9250_getAccelX_mss();
-		acc_y = MPU9250_getAccelY_mss();
-		acc_z = MPU9250_getAccelZ_mss();
-
-		gyro_x = (-1)*MPU9250_getGyroX_rads();
-		gyro_y = (-1)*MPU9250_getGyroY_rads();
-		gyro_z = MPU9250_getGyroZ_rads();
-
-		mag_x = MPU9250_getMagX_uT();
-		mag_y = MPU9250_getMagY_uT();
-		mag_z = MPU9250_getMagZ_uT();
-
-		Mahony_update(gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, mag_x, mag_y, mag_z);
-
-		if(loop_counter%100 == 0)
-		{
-			sprintf (buffer, "Roll: %0.1f Pitch: %0.1f Yaw: %0.1f\n", Mahony_getRoll(), Mahony_getPitch(), Mahony_getYaw());
-			send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
-		}
-
-		loop_counter ++;
-		while((get_micros()) < 1000);
-	}
-
-  loop_counter = 0;
 
   while (1)
   {
 	reset_micros();
+
+	// Blink LED
+	HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+	HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
 
 	// Update battery voltage
 	prim_batt_volts = __PRIM_BATT_VOLTAGE(__ADC_RAW_TO_VOLTS(ADC_BUFF[0]));
 	sec_batt_volts = __SEC_BATT_VOLTAGE(__ADC_RAW_TO_VOLTS(ADC_BUFF[1]));
 	sys_current_amps = __SYS_CURRENT(__ADC_RAW_TO_VOLTS(ADC_BUFF[2]));
 
+	// Get new IMU data
+	acc_x = MPU9250_getAccelX_mss()/9.81f;
+	acc_y = MPU9250_getAccelY_mss()/9.81f;
+	acc_z = MPU9250_getAccelZ_mss()/9.81f;
+
+	gyro_x = MPU9250_getGyroX_rads()*57.29578f;
+	gyro_y = MPU9250_getGyroY_rads()*57.29578f;
+	gyro_z = MPU9250_getGyroZ_rads()*57.29578f;
+
+	//mag_x = MPU9250_getMagX_uT();
+	//mag_y = MPU9250_getMagY_uT();
+	//mag_z = MPU9250_getMagZ_uT();
+
+	// Update AHRS filter
+	Mahony_update(gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, mag_x, mag_y, mag_z);
+
 	if(flg_new_receiver_input)
 	{
 		sbus_packets ++;
-		if(sbus_packets%10 == 0)
-		{
-			led3_state = !led3_state;
-			HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, led3_state);
-		}
-
 		update_receiver_inputs();
 		flush_sbus_dma_buffer();
 		flg_new_receiver_input = false;
@@ -430,18 +417,25 @@ int main(void)
 	}
 
 	//idle_all_motors();
-	set_motor_speed(MOTOR_RL_TIM_CHANNEL, (((float)receiver_inputs[0] - 170)/(1850-170))*100 );
-	set_motor_speed(MOTOR_FL_TIM_CHANNEL, (((float)receiver_inputs[1] - 170)/(1850-170))*100 );
-	set_motor_speed(MOTOR_FR_TIM_CHANNEL, (((float)receiver_inputs[2] - 170)/(1850-170))*100 );
-	set_motor_speed(MOTOR_RR_TIM_CHANNEL, (((float)receiver_inputs[3] - 170)/(1850-170))*100 );
+	set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, (((float)receiver_inputs[0] - 170)/(1850-170))*100 );
+	set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, (((float)receiver_inputs[1] - 170)/(1850-170))*100 );
+	set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, (((float)receiver_inputs[2] - 170)/(1850-170))*100 );
+	set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, (((float)receiver_inputs[3] - 170)/(1850-170))*100 );
 
 	if(loop_counter%40 == 0)
 	{
 		//sprintf (debug_tx_buffer, "Channels: %d %d %d %d\r\n", receiver_inputs[0], receiver_inputs[1], receiver_inputs[2], receiver_inputs[3]);
 		//send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, debug_tx_buffer);
 	}
-	while((get_micros()) < 2000);
+	if(loop_counter%100 == 0)
+	{
+		HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+		sprintf (buffer, "Pitch: %0.1f Roll: %0.1f Yaw: %0.1f\n", convert_AHRS_pitch(Mahony_getPitch()), convert_AHRS_roll(Mahony_getRoll()), convert_AHRS_yaw(Mahony_getYaw()));
+		HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+		send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
+	}
 	loop_counter ++;
+	while((get_micros()) < 1000);
 
   /* USER CODE END WHILE */
 
@@ -589,8 +583,16 @@ void HAL_UART_TxHalfCpltCallback(UART_HandleTypeDef *huart)
 // UART DMA TX transfer complete callback
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
+	HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
+	HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
 	if (huart->Instance == USART1)
 	{
+		flush_debug_dma_buffer();
+		return;
+	}
+	if (huart->Instance == USART6)
+	{
+		flush_debug_dma_buffer();
 		return;
 	}
 	return;
@@ -650,10 +652,8 @@ void HAL_I2C_MemRxCpltCallback(I2C_HandleTypeDef *hi2c)
 		// Raise I2C RX interrupt flag
 		i2c1_mem_rx_irq_flag = true;
 
-		HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_RESET);
 		if(continuous_imu_collection)
 			MPU9250_convertRawData(imu_data_buffer);
-		HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
 	}
 	return;
 }
@@ -767,10 +767,17 @@ uint32_t get_micros()
 // Set spped of a single motor
 // motor_channel: TIMER channel of the motor
 // speed_percent: positive float <= 100
-void set_motor_speed(uint32_t motor_Channel, float speed_percent)
+void set_motor_speed_percent(uint32_t motor_Channel, float percent)
 {
-	uint16_t pulse = MOTOR_MIN_PULSE + (speed_percent*0.01)*(MOTOR_MAX_PULSE - MOTOR_MIN_PULSE);
+	uint16_t pulse = MOTOR_MIN_PULSE + (percent*0.01)*(MOTOR_MAX_PULSE - MOTOR_MIN_PULSE);
+	set_motor_speed_pulse(motor_Channel, pulse);
 
+
+	return;
+}
+
+void set_motor_speed_pulse(uint32_t motor_Channel, float pulse)
+{
 	TIM_OC_InitTypeDef sConfigOC;
 	sConfigOC.OCMode = TIM_OCMODE_PWM1;
 	sConfigOC.Pulse = pulse;
@@ -788,10 +795,10 @@ void set_motor_speed(uint32_t motor_Channel, float speed_percent)
 // Set all motors to a very low speed
 void idle_all_motors()
 {
-	set_motor_speed(MOTOR_RL_TIM_CHANNEL, MOTOR_IDLE_SPEED);
-	set_motor_speed(MOTOR_FL_TIM_CHANNEL, MOTOR_IDLE_SPEED);
-	set_motor_speed(MOTOR_FR_TIM_CHANNEL, MOTOR_IDLE_SPEED);
-	set_motor_speed(MOTOR_RR_TIM_CHANNEL, MOTOR_IDLE_SPEED);
+	set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, MOTOR_IDLE_SPEED);
+	set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, MOTOR_IDLE_SPEED);
+	set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, MOTOR_IDLE_SPEED);
+	set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, MOTOR_IDLE_SPEED);
 	return;
 }
 
@@ -811,6 +818,32 @@ void stop_motor(uint32_t motor_Channel)
 {
 	HAL_TIM_PWM_Stop(MOTOR_TIMER_INSTANCE, motor_Channel);
 	return;
+}
+
+float convert_AHRS_pitch(float AHRS_pitch)
+{
+	float pitch = AHRS_pitch*(-1);
+	return pitch;
+}
+
+float convert_AHRS_roll(float AHRS_roll)
+{
+	float roll = 0;
+	if(AHRS_roll > 0)
+		roll = AHRS_roll - 180;
+	else if(AHRS_roll < 0)
+		roll = AHRS_roll + 180;
+	return roll;
+}
+
+float convert_AHRS_yaw(float AHRS_yaw)
+{
+	float yaw = 0;
+	if(AHRS_yaw > 180)
+		yaw = 360 - AHRS_yaw;
+	else if(AHRS_yaw < 180)
+		yaw = AHRS_yaw*(-1);
+	return yaw;
 }
 
 // Configure the MCU pins as regular GPIOs
