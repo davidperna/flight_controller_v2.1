@@ -67,10 +67,10 @@
 // Motor timer channels
 // FL = Front-left
 // RR = Rear-right
-#define MOTOR_RL_TIM_CHANNEL TIM_CHANNEL_1
-#define MOTOR_FL_TIM_CHANNEL TIM_CHANNEL_2
-#define MOTOR_FR_TIM_CHANNEL TIM_CHANNEL_3
-#define MOTOR_RR_TIM_CHANNEL TIM_CHANNEL_4
+#define MOTOR_RL_TIM_CHANNEL TIM_CHANNEL_3
+#define MOTOR_FL_TIM_CHANNEL TIM_CHANNEL_4
+#define MOTOR_FR_TIM_CHANNEL TIM_CHANNEL_1
+#define MOTOR_RR_TIM_CHANNEL TIM_CHANNEL_2
 #define MOTOR_TIMER_INSTANCE &htim1
 
 #define MOTOR_MIN_PULSE 1000 // In microseconds
@@ -254,7 +254,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   config_LEDs_for_GPIO();
-
+  stop_all_motors();
   // Enable idle line interrupts for serial debug
   __HAL_UART_ENABLE_IT(SERIAL_DEBUG_UART_INSTANCE, UART_IT_IDLE);
 
@@ -340,7 +340,10 @@ int main(void)
 	float mag_z = 0;//MPU9250_getMagZ_uT();
 
 	uint32_t loop_counter = 0;
-
+	set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, 0);
+	set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, 0);
+	set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, 0);
+	set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, 0);
   while (1)
   {
 	reset_micros();
@@ -417,10 +420,14 @@ int main(void)
 	}
 
 	//idle_all_motors();
-	set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, (((float)receiver_inputs[0] - 170)/(1850-170))*100 );
-	set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, (((float)receiver_inputs[1] - 170)/(1850-170))*100 );
-	set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, (((float)receiver_inputs[2] - 170)/(1850-170))*100 );
-	set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, (((float)receiver_inputs[3] - 170)/(1850-170))*100 );
+	if(loop_counter > 2000)
+		set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, 8);
+	if(loop_counter > 3000)
+		set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, 8);
+	if(loop_counter > 4000)
+		set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, 8);
+	if(loop_counter > 5000)
+		set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, 8);
 
 	if(loop_counter%40 == 0)
 	{
@@ -833,7 +840,7 @@ float convert_AHRS_roll(float AHRS_roll)
 		roll = AHRS_roll - 180;
 	else if(AHRS_roll < 0)
 		roll = AHRS_roll + 180;
-	return roll;
+	return roll*(-1);
 }
 
 float convert_AHRS_yaw(float AHRS_yaw)
