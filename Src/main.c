@@ -54,6 +54,7 @@
 #include "stdbool.h"
 #include <stdlib.h>
 #include "MPU9250.h"
+#include "MahonyAHRS.h"
 
 #define M_PI 3.1415926
 #define EPSILON 0.0000001
@@ -118,7 +119,7 @@ __IO bool flg_new_receiver_input = false;
 
 __IO bool continuous_imu_collection = false;
 
-#define DEBUG_OVER_WIRELESS
+//#define DEBUG_OVER_WIRELESS
 
 #ifdef DEBUG_OVER_WIRELESS
 #define SERIAL_DEBUG_UART_INSTANCE &huart5
@@ -315,25 +316,23 @@ int main(void)
 	continuous_imu_collection = true;
 	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
-	float acc_x = MPU9250_getAccelX_mss();
-	float acc_y = MPU9250_getAccelY_mss();
-	float acc_z = MPU9250_getAccelZ_mss();
+	// Wait a little bit to ensure an IMU sample has come in
+	HAL_Delay(3);
 
-	float gyro_x = (-1)*MPU9250_getGyroX_rads();
-	float gyro_y = (-1)*MPU9250_getGyroY_rads();
-	float gyro_z = MPU9250_getGyroZ_rads();
+	// Begin Mahony filter and set to 1kHz sample frequency
+	Mahony_begin(1000);
 
-	float angle_roll_gyro = 0;
-	float angle_pitch_gyro = 0;
-	float angle_yaw_gyro = 0;
+	float acc_x = 0;//MPU9250_getAccelX_mss();
+	float acc_y = 0;//MPU9250_getAccelY_mss();
+	float acc_z = 0;//MPU9250_getAccelZ_mss();
 
-	float acc_total_vector = 0;
-	float angle_roll_acc = 0;
-	float angle_pitch_acc = 0;
+	float gyro_x = 0;//(-1)*MPU9250_getGyroX_rads();
+	float gyro_y = 0;//(-1)*MPU9250_getGyroY_rads();
+	float gyro_z = 0;//MPU9250_getGyroZ_rads();
 
-	float angle_roll = 0;
-	float angle_pitch = 0;
-
+	float mag_x = 0;//MPU9250_getMagX_uT();
+	float mag_y = 0;//MPU9250_getMagY_uT();
+	float mag_z = 0;//MPU9250_getMagZ_uT();
 
 	uint32_t loop_counter = 0;
 	while(1)
@@ -351,36 +350,22 @@ int main(void)
 		gyro_y = (-1)*MPU9250_getGyroY_rads();
 		gyro_z = MPU9250_getGyroZ_rads();
 
+		mag_x = MPU9250_getMagX_uT();
+		mag_y = MPU9250_getMagY_uT();
+		mag_z = MPU9250_getMagZ_uT();
 
-		acc_total_vector = sqrt((acc_x*acc_x)+(acc_y*acc_y)+(acc_z*acc_z));
-
-		if(abs(acc_total_vector) > EPSILON)
-		{
-			if(abs(acc_x) < acc_total_vector)
-				angle_roll_acc = asin((float)acc_y/acc_total_vector)*(1);
-			if(abs(acc_y) < acc_total_vector)
-				angle_pitch_acc = asin((float)acc_x/acc_total_vector)*(-1);
-		}
-
-		angle_roll_gyro += gyro_x*0.001;
-		angle_pitch_gyro += gyro_y*0.001;
-		angle_yaw_gyro += gyro_z*0.001;
-
-		angle_roll_gyro += angle_pitch_gyro*sin(gyro_z*0.001);
-		angle_pitch_gyro -= angle_roll_gyro*sin(gyro_z*0.001);
-
-		angle_roll = angle_roll_gyro*0.999 + angle_roll_acc*0.001;
-		angle_pitch = angle_pitch_gyro*0.999 + angle_pitch_acc*0.001;
+		Mahony_update(gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, mag_x, mag_y, mag_z);
 
 		if(loop_counter%100 == 0)
 		{
-			sprintf (buffer, "Roll: %0.1f Pitch: %0.1f Yaw: %0.1f\n", angle_roll_gyro*57.2958, angle_pitch_gyro*57.2958, angle_yaw_gyro*57.2958);
+			sprintf (buffer, "Roll: %0.1f Pitch: %0.1f Yaw: %0.1f\n", Mahony_getRoll(), Mahony_getPitch(), Mahony_getYaw());
 			send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
 		}
 
 		loop_counter ++;
 		while((get_micros()) < 1000);
 	}
+
   loop_counter = 0;
 
   while (1)

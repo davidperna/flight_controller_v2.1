@@ -5,6 +5,7 @@
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
 ../Src/MPU9250.c \
+../Src/MahonyAHRS.c \
 ../Src/adc.c \
 ../Src/dma.c \
 ../Src/gpio.c \
@@ -19,6 +20,7 @@ C_SRCS += \
 
 OBJS += \
 ./Src/MPU9250.o \
+./Src/MahonyAHRS.o \
 ./Src/adc.o \
 ./Src/dma.o \
 ./Src/gpio.o \
@@ -33,6 +35,7 @@ OBJS += \
 
 C_DEPS += \
 ./Src/MPU9250.d \
+./Src/MahonyAHRS.d \
 ./Src/adc.d \
 ./Src/dma.d \
 ./Src/gpio.d \

@@ -319,7 +319,11 @@ int MPU9250_begin()
   }
   if (MPU9250_calibrateAccel() < 0) {
       return -21;
-    }
+  }
+  if (MPU9250_calibrateMag() < 0) {
+      return -22;
+  }
+
   // successful init, return 1
   return 1;
 }
