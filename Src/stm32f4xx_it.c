@@ -34,6 +34,7 @@
 #include "stm32f4xx_hal.h"
 #include "stm32f4xx.h"
 #include "stm32f4xx_it.h"
+#include "tim.h"
 
 /* USER CODE BEGIN 0 */
 
@@ -82,6 +83,15 @@ void HardFault_Handler(void)
   while (1)
   {
     /* USER CODE BEGIN W1_HardFault_IRQn 0 */
+	  HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_1);
+	  HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_2);
+	  HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_3);
+	  HAL_TIM_PWM_Stop(&htim1, TIM_CHANNEL_4);
+
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+
     /* USER CODE END W1_HardFault_IRQn 0 */
   }
   /* USER CODE BEGIN HardFault_IRQn 1 */

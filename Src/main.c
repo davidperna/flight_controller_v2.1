@@ -82,6 +82,18 @@
 #define __SEC_BATT_VOLTAGE(adc_volts) (1.500 + ((double)adc_volts)*0.3667)*1.8667
 #define __SYS_CURRENT(adc_volts) (((double)adc_volts)/200.0)/0.01 //200V/V gain and 0R01 sense resistor
 
+#define DEBUG_OVER_WIRELESS
+
+#ifdef DEBUG_OVER_WIRELESS
+#define SERIAL_DEBUG_UART_INSTANCE &huart5
+#endif
+
+#ifndef DEBUG_OVER_WIRELESS
+#define SERIAL_DEBUG_UART_INSTANCE &huart1
+#endif
+
+#define SBUS_UART_INSTANCE &huart6
+
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
@@ -119,17 +131,56 @@ __IO bool flg_new_receiver_input = false;
 
 __IO bool continuous_imu_collection = false;
 
-#define DEBUG_OVER_WIRELESS
+bool kill_switch_active = true;
+bool started_main_loop = false;
 
-#ifdef DEBUG_OVER_WIRELESS
-#define SERIAL_DEBUG_UART_INSTANCE &huart5
-#endif
+//YMFC variables//
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//PID gain and limit settings
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+float pid_p_gain_roll = 2;               //Gain setting for the roll P-controller
+float pid_i_gain_roll = 0.05;//0.0002;              //Gain setting for the roll I-controller
+float pid_d_gain_roll = 5.0;              //Gain setting for the roll D-controller
+int pid_max_roll = 400;                    //Maximum output of the PID-controller (+/-)
 
-#ifndef DEBUG_OVER_WIRELESS
-#define SERIAL_DEBUG_UART_INSTANCE &huart1
-#endif
+float pid_p_gain_pitch = 2;  //Gain setting for the pitch P-controller.
+float pid_i_gain_pitch = 0.05;//0.0002;//pid_i_gain_roll;  //Gain setting for the pitch I-controller.
+float pid_d_gain_pitch = 5.0;//pid_d_gain_roll;  //Gain setting for the pitch D-controller.
+int pid_max_pitch = 400;//pid_max_roll;          //Maximum output of the PID-controller (+/-)
 
-#define SBUS_UART_INSTANCE &huart6
+float pid_p_gain_yaw = 10.0;                //Gain setting for the pitch P-controller. //4.0
+float pid_i_gain_yaw = 0.02;               //Gain setting for the pitch I-controller. //0.02
+float pid_d_gain_yaw = 0.0;                //Gain setting for the pitch D-controller.
+int pid_max_yaw = 400;                     //Maximum output of the PID-controller (+/-)
+
+bool auto_level = false;                 //Auto level on (true) or off (false)
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//Declaring global variables
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//uint8_t last_channel_1, last_channel_2, last_channel_3, last_channel_4;
+volatile int receiver_input_channel_1, receiver_input_channel_2, receiver_input_channel_3, receiver_input_channel_4;
+int counter_channel_1, counter_channel_2, counter_channel_3, counter_channel_4, loop_counter;
+int esc_1, esc_2, esc_3, esc_4;
+int throttle, battery_voltage;
+int cal_int, start, gyro_address, num_samples;
+int receiver_input[5];
+int temperature;
+int acc_axis[4], gyro_axis[4];
+float roll_level_adjust, pitch_level_adjust;
+
+long acc_x, acc_y, acc_z, acc_total_vector;
+unsigned long timer_channel_1, timer_channel_2, timer_channel_3, timer_channel_4, esc_timer, esc_loop_timer;
+unsigned long timer_1, timer_2, timer_3, timer_4, current_time;
+unsigned long loop_timer;
+double gyro_pitch, gyro_roll, gyro_yaw;
+double gyro_axis_cal[4];
+float pid_error_temp;
+float pid_i_mem_roll, pid_roll_setpoint, gyro_roll_input, pid_output_roll, pid_last_roll_d_error;
+float pid_i_mem_pitch, pid_pitch_setpoint, gyro_pitch_input, pid_output_pitch, pid_last_pitch_d_error;
+float pid_i_mem_yaw, pid_yaw_setpoint, gyro_yaw_input, pid_output_yaw, pid_last_yaw_d_error;
+float angle_roll_acc, angle_pitch_acc, angle_pitch, angle_roll;
+bool gyro_angles_set;
 
 /* USER CODE END PV */
 
@@ -197,6 +248,13 @@ float convert_AHRS_pitch(float AHRS_pitch);
 float convert_AHRS_roll(float AHRS_roll);
 float convert_AHRS_yaw(float AHRS_yaw);
 
+bool check_kill_switch(void);
+
+// YMFC functions
+void convertInputToYMFC();
+void calculate_pid();
+
+
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
@@ -258,11 +316,17 @@ int main(void)
   // Enable idle line interrupts for serial debug
   __HAL_UART_ENABLE_IT(SERIAL_DEBUG_UART_INSTANCE, UART_IT_IDLE);
 
+  // Flush SBUS dma buffer
+  flush_sbus_dma_buffer();
+
   // Enable idle line interrupt for SBUS
   __HAL_UART_ENABLE_IT(SBUS_UART_INSTANCE, UART_IT_IDLE);
 
   // Start DMA for serial debug
   HAL_UART_Receive_DMA(SERIAL_DEBUG_UART_INSTANCE, debug_rx_buffer, sizeof(debug_rx_buffer));
+
+  // Give time for ADC to collect sample
+  HAL_Delay(10);
 
   float prim_batt_volts = __PRIM_BATT_VOLTAGE(__ADC_RAW_TO_VOLTS(ADC_BUFF[0]));
   float sec_batt_volts = __SEC_BATT_VOLTAGE(__ADC_RAW_TO_VOLTS(ADC_BUFF[1]));
@@ -277,7 +341,26 @@ int main(void)
   sprintf (buffer, "System current: %0.3f A\n", sys_current_amps);
   send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
 
+  // If under voltage, blink red LED to indicate
+	if(prim_batt_volts < 10.5)
+	{
+		sprintf (buffer, "Low battery!\n");
+		send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+		for(uint8_t i = 0; i < 10; i++)
+		{
+			HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+			HAL_Delay(100);
+			HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+			HAL_Delay(100);
+		}
+	}
 
+	if(prim_batt_volts < 10.0)
+	{
+		sprintf (buffer, "Battery level too low to start\n");
+		send_debug_string_blocking(SERIAL_DEBUG_UART_INSTANCE, buffer);
+		while(1);
+	}
 
   /*
     uint8_t i2c1_rx_buffer[1];
@@ -317,6 +400,9 @@ int main(void)
 	// setting SRD to 2 for a 500 Hz update rate
 	//MPU9250_setSrd(0);
 
+	// IMU ready and calibrated, set start to 0
+	start = 0;
+
 	MPU9250_enableDataReadyInterrupt();
 	continuous_imu_collection = true;
 	HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
@@ -340,10 +426,31 @@ int main(void)
 	float mag_z = 0;//MPU9250_getMagZ_uT();
 
 	uint32_t loop_counter = 0;
+
+	// Enable all PWM channels so the ESC start-up
 	set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, 0);
 	set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, 0);
 	set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, 0);
 	set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, 0);
+
+	// Do not start until kill switch goes from on to off
+	while(!check_kill_switch()) //Wait until kill switch is on
+	{
+		sprintf(buffer, "%d %d %d \r\n", receiver_inputs[0], receiver_inputs[4],check_kill_switch());
+		send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
+		HAL_Delay(100);
+
+	}
+	while(check_kill_switch()) //Wait until kill switch is off
+	{
+			sprintf(buffer, "%d %d %d \r\n", receiver_inputs[0], receiver_inputs[4],check_kill_switch());
+			send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
+			HAL_Delay(100);
+
+	}
+	// Startup motors
+	started_main_loop = true; // Set this flag to let some interrupts know
+
   while (1)
   {
 	reset_micros();
@@ -373,18 +480,129 @@ int main(void)
 	// Update AHRS filter
 	Mahony_update(gyro_x, gyro_y, gyro_z, acc_x, acc_y, acc_z, mag_x, mag_y, mag_z);
 
+	// Update YMFC angle variables
+
+	// Use complementary filter for gyro inputs
+	gyro_roll_input = (gyro_roll_input * 0.7) + (gyro_x * 0.3);   //Gyro pid input is deg/sec.
+	gyro_pitch_input = (gyro_pitch_input * 0.7) + (gyro_y * 0.3);//Gyro pid input is deg/sec.
+	gyro_yaw_input = (gyro_yaw_input * 0.7) + (gyro_z * 0.3);      //Gyro pid input is deg/sec.
+
+	angle_pitch = convert_AHRS_pitch(Mahony_getPitch());
+	angle_roll = convert_AHRS_roll(Mahony_getRoll());
+
+	pitch_level_adjust = angle_pitch * 15;                                    //Calculate the pitch angle correction
+	roll_level_adjust = angle_roll * 15;                                      //Calculate the roll angle correction
+
+	if(!auto_level){                                                          //If the quadcopter is not in auto-level mode
+		pitch_level_adjust = 0;                                                 //Set the pitch angle correction to zero.
+		roll_level_adjust = 0;                                                  //Set the roll angle correcion to zero.
+	}
+
+	//For starting the motors: throttle low and yaw left (step 1).
+	if(receiver_input_channel_3 < 1050 && receiver_input_channel_4 < 1050)start = 1;
+	//When yaw stick is back in the center position start the motors (step 2).
+	if(start == 1 && receiver_input_channel_3 < 1050 && receiver_input_channel_4 > 1450){
+		start = 2;
+
+
+		angle_pitch = angle_pitch_acc;                                          //Set the gyro pitch angle equal to the accelerometer pitch angle when the quadcopter is started.
+		angle_roll = angle_roll_acc;                                            //Set the gyro roll angle equal to the accelerometer roll angle when the quadcopter is started.
+		gyro_angles_set = true;                                                 //Set the IMU started flag.
+
+		//Reset the PID controllers for a bumpless start.
+		pid_i_mem_roll = 0;
+		pid_last_roll_d_error = 0;
+		pid_i_mem_pitch = 0;
+		pid_last_pitch_d_error = 0;
+		pid_i_mem_yaw = 0;
+		pid_last_yaw_d_error = 0;
+
+	}
+
+	//Stopping the motors: throttle low and yaw right.
+	if(start == 2 && receiver_input_channel_3 < 1050 && receiver_input_channel_4 > 1950)start = 0;
+
+
+	//The PID set point in degrees per second is determined by the roll receiver input.
+	//In the case of deviding by 3 the max roll rate is aprox 164 degrees per second ( (500-8)/3 = 164d/s ).
+	pid_roll_setpoint = 0;
+	//We need a little dead band of 16us for better results.
+	if(receiver_input_channel_1 > 1508)pid_roll_setpoint = receiver_input_channel_1 - 1508;
+	else if(receiver_input_channel_1 < 1492)pid_roll_setpoint = receiver_input_channel_1 - 1492;
+
+	pid_roll_setpoint -= roll_level_adjust;                                   //Subtract the angle correction from the standardized receiver roll input value.
+	pid_roll_setpoint /= 3.0;                                                 //Divide the setpoint for the PID roll controller by 3 to get angles in degrees.
+
+
+	//The PID set point in degrees per second is determined by the pitch receiver input.
+	//In the case of deviding by 3 the max pitch rate is aprox 164 degrees per second ( (500-8)/3 = 164d/s ).
+	pid_pitch_setpoint = 0;
+	//We need a little dead band of 16us for better results.
+	if(receiver_input_channel_2 > 1508)pid_pitch_setpoint = (receiver_input_channel_2 - 1508)*-1;
+	else if(receiver_input_channel_2 < 1492)pid_pitch_setpoint = (receiver_input_channel_2 - 1492)*-1;
+
+	pid_pitch_setpoint -= pitch_level_adjust;                                  //Subtract the angle correction from the standardized receiver pitch input value.
+	pid_pitch_setpoint /= 3.0;                                                 //Divide the setpoint for the PID pitch controller by 3 to get angles in degrees.
+
+	//The PID set point in degrees per second is determined by the yaw receiver input.
+	//In the case of deviding by 3 the max yaw rate is aprox 164 degrees per second ( (500-8)/3 = 164d/s ).
+	pid_yaw_setpoint = 0;
+
+	//We need a little dead band of 16us for better results.
+	if(receiver_input_channel_3 > 1050){ //Do not yaw when turning off the motors.
+		if(receiver_input_channel_4 > 1508)pid_yaw_setpoint = ((receiver_input_channel_4 - 1508)/3.0)*1;//*-1 to invert yaw direction
+		else if(receiver_input_channel_4 < 1492)pid_yaw_setpoint = ((receiver_input_channel_4 - 1492)/3.0)*1;//*-1 to invert yaw direction
+	}
+
+	calculate_pid();                                                            //PID inputs are known. So we can calculate the pid output.
+
+	throttle = receiver_input_channel_3;                                      //We need the throttle signal as a base signal.
+
+	if (start == 2){                                                          //The motors are started.
+		if (throttle > 1800) throttle = 1800;                                   //We need some room to keep full control at full throttle.
+		esc_1 = throttle - pid_output_pitch + pid_output_roll - pid_output_yaw; //Calculate the pulse for esc 1 (front-right - CCW)
+		esc_2 = throttle + pid_output_pitch + pid_output_roll + pid_output_yaw; //Calculate the pulse for esc 2 (rear-right - CW)
+		esc_3 = throttle + pid_output_pitch - pid_output_roll - pid_output_yaw; //Calculate the pulse for esc 3 (rear-left - CCW)
+		esc_4 = throttle - pid_output_pitch - pid_output_roll + pid_output_yaw; //Calculate the pulse for esc 4 (front-left - CW)
+
+		if (esc_1 < 1100) esc_1 = 1100;                                         //Keep the motors running.
+		if (esc_2 < 1100) esc_2 = 1100;                                         //Keep the motors running.
+		if (esc_3 < 1100) esc_3 = 1100;                                         //Keep the motors running.
+		if (esc_4 < 1100) esc_4 = 1100;                                         //Keep the motors running.
+
+		if(esc_1 > 2000)esc_1 = 2000;                                           //Limit the esc-1 pulse to 2000us.
+		if(esc_2 > 2000)esc_2 = 2000;                                           //Limit the esc-2 pulse to 2000us.
+		if(esc_3 > 2000)esc_3 = 2000;                                           //Limit the esc-3 pulse to 2000us.
+		if(esc_4 > 2000)esc_4 = 2000;                                           //Limit the esc-4 pulse to 2000us.
+	}
+
+	else{
+	esc_1 = 1050;                                                           //If start is not 2 keep a 1000us pulse for ess-1.
+	esc_2 = 1050;                                                           //If start is not 2 keep a 1000us pulse for ess-2.
+	esc_3 = 1050;                                                           //If start is not 2 keep a 1000us pulse for ess-3.
+	esc_4 = 1050;                                                           //If start is not 2 keep a 1000us pulse for ess-4.
+	}
+
+	if(!check_kill_switch())
+	{
+		set_motor_speed_pulse(MOTOR_FR_TIM_CHANNEL, esc_1);
+		set_motor_speed_pulse(MOTOR_RR_TIM_CHANNEL, esc_2);
+		set_motor_speed_pulse(MOTOR_RL_TIM_CHANNEL, esc_3);
+		set_motor_speed_pulse(MOTOR_FL_TIM_CHANNEL, esc_4);
+	}
+
 	if(flg_new_receiver_input)
 	{
 		sbus_packets ++;
 		update_receiver_inputs();
+		convertInputToYMFC();
 		flush_sbus_dma_buffer();
 		flg_new_receiver_input = false;
+		check_kill_switch();
 	}
 
 	if(flg_new_debug_message)
 	{
-		HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_RESET);
-		HAL_GPIO_WritePin(LED2_GPIO_Port, LED2_Pin, GPIO_PIN_SET);
 		//Make a copy of the message so the DMA can get flushed
 		uint8_t message_copy[DEBUG_RX_BUFFER_SIZE];
 		memcpy(message_copy, debug_rx_buffer, strlen(debug_rx_buffer));
@@ -420,14 +638,6 @@ int main(void)
 	}
 
 	//idle_all_motors();
-	if(loop_counter > 2000)
-		set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, 8);
-	if(loop_counter > 3000)
-		set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, 8);
-	if(loop_counter > 4000)
-		set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, 8);
-	if(loop_counter > 5000)
-		set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, 8);
 
 	if(loop_counter%40 == 0)
 	{
@@ -436,10 +646,8 @@ int main(void)
 	}
 	if(loop_counter%100 == 0)
 	{
-		HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-		sprintf (buffer, "Pitch: %0.1f Roll: %0.1f Yaw: %0.1f\n", convert_AHRS_pitch(Mahony_getPitch()), convert_AHRS_roll(Mahony_getRoll()), convert_AHRS_yaw(Mahony_getYaw()));
-		HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
-		send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
+		//sprintf (buffer, "Gyro: %0.2f %0.2f %0.2f -- Pitch: %0.1f Roll: %0.1f Yaw: %0.1f\n", gyro_x, gyro_y, gyro_z, convert_AHRS_pitch(Mahony_getPitch()), convert_AHRS_roll(Mahony_getRoll()), convert_AHRS_yaw(Mahony_getYaw()));
+		//send_debug_string_dma(SERIAL_DEBUG_UART_INSTANCE, buffer);
 	}
 	loop_counter ++;
 	while((get_micros()) < 1000);
@@ -590,8 +798,6 @@ void HAL_UART_TxHalfCpltCallback(UART_HandleTypeDef *huart)
 // UART DMA TX transfer complete callback
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-	HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
-	HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
 	if (huart->Instance == USART1)
 	{
 		flush_debug_dma_buffer();
@@ -637,8 +843,14 @@ void UART6_IRQCallback()
 {
 	if (USART6->SR & USART_SR_IDLE)
 	{
+		HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
+		HAL_GPIO_TogglePin(LED1_GPIO_Port, LED1_Pin);
 		__HAL_UART_CLEAR_IDLEFLAG (SBUS_UART_INSTANCE);
 		flg_new_receiver_input = true;
+		if(!started_main_loop)
+		{
+			update_receiver_inputs();
+		}
 	}
 	return;
 }
@@ -812,6 +1024,10 @@ void idle_all_motors()
 // Stop all motors
 void stop_all_motors()
 {
+	//set_motor_speed_percent(MOTOR_RL_TIM_CHANNEL, 0);
+	//set_motor_speed_percent(MOTOR_FL_TIM_CHANNEL, 0);
+	//set_motor_speed_percent(MOTOR_FR_TIM_CHANNEL, 0);
+	//set_motor_speed_percent(MOTOR_RR_TIM_CHANNEL, 0);
 	stop_motor(MOTOR_RL_TIM_CHANNEL);
 	stop_motor(MOTOR_FL_TIM_CHANNEL);
 	stop_motor(MOTOR_FR_TIM_CHANNEL);
@@ -840,7 +1056,7 @@ float convert_AHRS_roll(float AHRS_roll)
 		roll = AHRS_roll - 180;
 	else if(AHRS_roll < 0)
 		roll = AHRS_roll + 180;
-	return roll*(-1);
+	return roll;
 }
 
 float convert_AHRS_yaw(float AHRS_yaw)
@@ -851,6 +1067,75 @@ float convert_AHRS_yaw(float AHRS_yaw)
 	else if(AHRS_yaw < 180)
 		yaw = AHRS_yaw*(-1);
 	return yaw;
+}
+
+// Check if kill switch is activated. If so, put all ESCs in reset
+bool check_kill_switch(void)
+{
+	// Kill switch activated as soon as channel 4 stops reading 172
+	if(receiver_inputs[4] != 172)
+	{
+		kill_switch_active = true;
+		stop_all_motors();
+		start = 0;
+	}
+	else
+	{
+		kill_switch_active = false;
+	}
+	return kill_switch_active;
+}
+
+// Convert the reveiver inputs to the expected YMFC variable names
+void convertInputToYMFC()
+{
+	//Values in receiver_inputs array vary from 170 - 1820
+	//YMFC variables (receiver_input_channel_x) vary from 1000 - 2000
+	//Scale accordingly
+	receiver_input_channel_1 = 1000 + ((receiver_inputs[1] - 170) * 0.606); //roll input
+	receiver_input_channel_2 = 1000 + ((receiver_inputs[2] - 170) * 0.606); //pitch input
+	receiver_input_channel_3 = 1000 + ((receiver_inputs[0] - 170) * 0.606); //throttle input
+	receiver_input_channel_4 = 1000 + ((receiver_inputs[3] - 170) * 0.606); //yaw input
+	return;
+}
+
+void calculate_pid()
+{
+  //Roll calculations
+  pid_error_temp = gyro_roll_input - pid_roll_setpoint;
+  pid_i_mem_roll += pid_i_gain_roll * pid_error_temp;
+  if(pid_i_mem_roll > pid_max_roll)pid_i_mem_roll = pid_max_roll;
+  else if(pid_i_mem_roll < pid_max_roll * -1)pid_i_mem_roll = pid_max_roll * -1;
+
+  pid_output_roll = pid_p_gain_roll * pid_error_temp + pid_i_mem_roll + pid_d_gain_roll * (pid_error_temp - pid_last_roll_d_error);
+  if(pid_output_roll > pid_max_roll)pid_output_roll = pid_max_roll;
+  else if(pid_output_roll < pid_max_roll * -1)pid_output_roll = pid_max_roll * -1;
+
+  pid_last_roll_d_error = pid_error_temp;
+
+  //Pitch calculations
+  pid_error_temp = gyro_pitch_input - pid_pitch_setpoint;
+  pid_i_mem_pitch += pid_i_gain_pitch * pid_error_temp;
+  if(pid_i_mem_pitch > pid_max_pitch)pid_i_mem_pitch = pid_max_pitch;
+  else if(pid_i_mem_pitch < pid_max_pitch * -1)pid_i_mem_pitch = pid_max_pitch * -1;
+
+  pid_output_pitch = pid_p_gain_pitch * pid_error_temp + pid_i_mem_pitch + pid_d_gain_pitch * (pid_error_temp - pid_last_pitch_d_error);
+  if(pid_output_pitch > pid_max_pitch)pid_output_pitch = pid_max_pitch;
+  else if(pid_output_pitch < pid_max_pitch * -1)pid_output_pitch = pid_max_pitch * -1;
+
+  pid_last_pitch_d_error = pid_error_temp;
+
+  //Yaw calculations
+  pid_error_temp = gyro_yaw_input - pid_yaw_setpoint;
+  pid_i_mem_yaw += pid_i_gain_yaw * pid_error_temp;
+  if(pid_i_mem_yaw > pid_max_yaw)pid_i_mem_yaw = pid_max_yaw;
+  else if(pid_i_mem_yaw < pid_max_yaw * -1)pid_i_mem_yaw = pid_max_yaw * -1;
+
+  pid_output_yaw = pid_p_gain_yaw * pid_error_temp + pid_i_mem_yaw + pid_d_gain_yaw * (pid_error_temp - pid_last_yaw_d_error);
+  if(pid_output_yaw > pid_max_yaw)pid_output_yaw = pid_max_yaw;
+  else if(pid_output_yaw < pid_max_yaw * -1)pid_output_yaw = pid_max_yaw * -1;
+
+  pid_last_yaw_d_error = pid_error_temp;
 }
 
 // Configure the MCU pins as regular GPIOs

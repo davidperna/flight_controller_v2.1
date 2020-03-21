@@ -32,7 +32,8 @@ Src/stm32f4xx_it.o: ../Src/stm32f4xx_it.c \
  C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim.h \
  C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_tim_ex.h \
  C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h \
- C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/stm32f4xx_it.h
+ C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/stm32f4xx_it.h \
+ C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/tim.h
 
 C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal.h:
 
@@ -101,3 +102,5 @@ C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_con
 C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Drivers/STM32F4xx_HAL_Driver/Inc/stm32f4xx_hal_uart.h:
 
 C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/stm32f4xx_it.h:
+
+C:/Users/David\ Perna/Documents/SW4\ Workspace/flight_controller_v2.1/flight_controller_v2.1/Inc/tim.h:
